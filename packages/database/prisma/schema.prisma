@@ -50,16 +50,19 @@ enum EmploymentType {
 }
 
 model Organization {
-  id          String        @id @default(cuid())
-  name        String
-  slug        String        @unique
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  memberships Membership[]
-  roles       Role[]
-  licenses    License[]
-  invitations Invitation[]
-  employees   Employee[]
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  memberships  Membership[]
+  roles        Role[]
+  licenses     License[]
+  invitations  Invitation[]
+  employees    Employee[]
+  departments  Department[]
+  positions    Position[]
+  history      EmployeeHistory[]
 
   @@index([createdAt])
 }
@@ -76,6 +79,7 @@ model User {
   sessions        Session[]
   invitations     Invitation[]
   employee        Employee?
+  employeeHistory EmployeeHistory[] @relation("HistoryActor")
 
   @@index([status])
   @@index([createdAt])
@@ -136,10 +140,48 @@ model Invitation {
   @@index([expiresAt])
 }
 
+model Department {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  code           String?
+  description    String?
+  parentId       String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent         Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Department[] @relation("DepartmentHierarchy")
+  employees      Employee[]
+  positions      Position[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, code])
+  @@index([organizationId, parentId])
+}
+
+model Position {
+  id             String       @id @default(cuid())
+  organizationId String
+  departmentId   String?
+  title          String
+  code           String?
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department     Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees      Employee[]
+
+  @@unique([organizationId, title])
+  @@unique([organizationId, code])
+  @@index([organizationId, departmentId])
+}
+
 model Employee {
-  id               String         @id @default(cuid())
+  id               String           @id @default(cuid())
   organizationId   String
-  userId           String?        @unique
+  userId           String?          @unique
   employeeNumber   String
   firstName        String
   lastName         String
@@ -150,26 +192,48 @@ model Employee {
   dateOfBirth      DateTime?
   gender           String?
   jobTitle         String?
-  department      String?
+  departmentId     String?
+  positionId       String?
   location         String?
   managerId        String?
-  employmentType   EmploymentType @default(FULL_TIME)
-  status           EmployeeStatus  @default(ACTIVE)
+  employmentType   EmploymentType   @default(FULL_TIME)
+  status           EmployeeStatus   @default(ACTIVE)
   hireDate         DateTime?
   terminationDate  DateTime?
   notes            String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user             User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
-  manager          Employee?      @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
-  directReports    Employee[]     @relation("EmployeeManager")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  department       Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position         Position?        @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  manager          Employee?        @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports    Employee[]       @relation("EmployeeManager")
+  history          EmployeeHistory[]
 
   @@unique([organizationId, employeeNumber])
   @@index([organizationId, status])
-  @@index([organizationId, department])
+  @@index([organizationId, departmentId])
+  @@index([organizationId, positionId])
   @@index([organizationId, managerId])
   @@index([organizationId, hireDate])
+}
+
+model EmployeeHistory {
+  id             String       @id @default(cuid())
+  organizationId String
+  employeeId     String
+  actorUserId    String
+  type           String
+  previousValue  String?      @db.Text
+  newValue       String?      @db.Text
+  occurredAt     DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  actor          User         @relation("HistoryActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, employeeId, occurredAt])
+  @@index([organizationId, type, occurredAt])
 }
 
 model Role {
