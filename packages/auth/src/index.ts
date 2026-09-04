@@ -28,5 +28,9 @@ export function hasPermission(permissions: Permission[], required: Permission): 
   return permissions.some((permission) => permissionKey(permission.resource, permission.action) === requiredKey);
 }
 
+export { SYSTEM_PERMISSIONS } from './system-permissions';
+export type { SystemPermission } from './system-permissions';
+export { SYSTEM_ROLES } from './system-roles';
+export type { SystemRoleKey, SystemRolePermission } from './system-roles';
 export { hashPassword, verifyPassword } from './password';
 export { createSessionToken, hashSessionToken } from './session-token';
