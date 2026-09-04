@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@hrm/database';
+import { RoleProvisioningService } from './role-provisioning.service';
 
 @Injectable()
 export class OrganizationService {
+  constructor(private readonly roleProvisioningService: RoleProvisioningService) {}
+
   async createForUser(userId: string, name: string) {
     const normalizedName = name.trim();
     if (normalizedName.length < 2) throw new BadRequestException('Organization name is too short');
@@ -17,22 +20,22 @@ export class OrganizationService {
       slug = `${baseSlug}-${suffix}`;
     }
 
-    return prisma.$transaction(async (tx) => {
-      const organization = await tx.organization.create({ data: { name: normalizedName, slug } });
+    const organization = await prisma.$transaction(async (tx) => {
+      const created = await tx.organization.create({ data: { name: normalizedName, slug } });
       const membership = await tx.membership.create({
-        data: { organizationId: organization.id, userId, status: 'ACTIVE' },
+        data: { organizationId: created.id, userId, status: 'ACTIVE' },
       });
-      const ownerRole = await tx.role.create({
-        data: {
-          organizationId: organization.id,
-          name: 'Owner',
-          description: 'Full administrative access to the organization',
-          isSystem: true,
-        },
-      });
-      await tx.membershipRole.create({ data: { membershipId: membership.id, roleId: ownerRole.id } });
-      return { organization, membership, role: ownerRole };
+      return { organization: created, membership };
     });
+
+    const roles = await this.roleProvisioningService.provision(organization.organization.id, organization.membership.id);
+    const ownerRole = roles.find((role) => role.name === 'Owner');
+
+    return {
+      organization: organization.organization,
+      membership: organization.membership,
+      role: ownerRole ?? null,
+    };
   }
 
   async getMembership(userId: string, organizationId: string) {
