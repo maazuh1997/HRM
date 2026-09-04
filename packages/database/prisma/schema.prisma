@@ -20,14 +20,22 @@ enum UserStatus {
   DEACTIVATED
 }
 
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUSPENDED
+}
+
 model Organization {
-  id          String       @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
-  slug        String       @unique
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  slug        String        @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   memberships Membership[]
   roles       Role[]
+  licenses    License[]
 
   @@index([createdAt])
 }
@@ -48,14 +56,14 @@ model User {
 }
 
 model Session {
-  id        String    @id @default(cuid())
-  userId    String
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -126,4 +134,27 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@index([permissionId])
+}
+
+model License {
+  id             String        @id @default(cuid())
+  organizationId String
+  licenseId      String        @unique
+  keyId          String
+  status         LicenseStatus @default(ACTIVE)
+  edition        String
+  deployment     String
+  issuedAt       DateTime
+  expiresAt      DateTime
+  maxHrUsers     Int
+  maxEmployees   Int
+  entitlements   Json
+  payload        String        @db.Text
+  signature      String        @db.Text
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([expiresAt])
 }
