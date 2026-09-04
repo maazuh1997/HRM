@@ -72,6 +72,23 @@ export class LeaveService {
     });
   }
 
+  async listForUser(organizationId: string, userId: string) {
+    const employee = await this.employeeForUser(organizationId, userId);
+    return prisma.leaveRequest.findMany({ where: { organizationId, employeeId: employee.id }, include: { leaveType: true }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async getForUser(organizationId: string, userId: string, requestId: string) {
+    const employee = await this.employeeForUser(organizationId, userId);
+    const request = await prisma.leaveRequest.findFirst({ where: { id: requestId, organizationId, employeeId: employee.id }, include: { leaveType: true } });
+    if (!request) throw new NotFoundException('Leave request not found');
+    return request;
+  }
+
+  async getBalancesForUser(organizationId: string, userId: string) {
+    const employee = await this.employeeForUser(organizationId, userId);
+    return prisma.leaveBalance.findMany({ where: { organizationId, employeeId: employee.id }, include: { leaveType: true }, orderBy: [{ year: 'desc' }, { createdAt: 'desc' }] });
+  }
+
   async cancelRequestForUser(organizationId: string, userId: string, requestId: string) {
     const employee = await this.employeeForUser(organizationId, userId);
     return this.cancelRequest(organizationId, employee.id, requestId);
@@ -89,5 +106,9 @@ export class LeaveService {
       await tx.leaveBalance.updateMany({ where: { organizationId, employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
       return updated;
     });
+  }
+
+  async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
+    return this.approvalService.decideLeaveRequest(organizationId, requestId, approverUserId, decision, note);
   }
 }
