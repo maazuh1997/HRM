@@ -1,24 +1,26 @@
-export type PermissionAction = 'create' | 'read' | 'update' | 'delete' | 'manage';
+export const actions = ['create', 'read', 'update', 'delete', 'manage'] as const;
 
-export interface Permission {
+export type AuthorizationAction = (typeof actions)[number];
+
+export type Permission = {
   resource: string;
-  action: PermissionAction;
-}
+  action: AuthorizationAction;
+};
 
-export interface AuthorizationContext {
+export type AuthorizationContext = {
   userId: string;
   organizationId: string;
+  membershipId: string;
   permissions: readonly Permission[];
-}
+};
 
 export function hasPermission(
   context: AuthorizationContext,
-  resource: string,
-  action: PermissionAction,
+  required: Permission,
 ): boolean {
   return context.permissions.some(
-    (permission) =>
-      permission.resource === resource &&
-      (permission.action === action || permission.action === 'manage'),
+    (granted) =>
+      (granted.resource === required.resource || granted.resource === '*') &&
+      (granted.action === required.action || granted.action === 'manage'),
   );
 }
