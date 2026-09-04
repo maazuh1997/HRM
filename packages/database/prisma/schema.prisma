@@ -36,6 +36,8 @@ model Organization {
   approvalWorkflows ApprovalWorkflow[]
   auditLogs AuditLog[]
   outboxEvents OutboxEvent[]
+  notifications Notification[]
+  notificationDeliveries NotificationDelivery[]
   @@index([createdAt])
 }
 
@@ -57,6 +59,7 @@ model User {
   approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
   auditLogs AuditLog[] @relation("AuditLogActor")
   outboxEvents OutboxEvent[] @relation("OutboxEventActor")
+  notifications Notification[]
   @@index([status])
   @@index([createdAt])
 }
@@ -417,4 +420,42 @@ model OutboxEvent {
   @@index([availableAt, processedAt])
   @@index([organizationId, createdAt])
   @@index([type, resourceType, resourceId])
+}
+
+model Notification {
+  id String @id @default(cuid())
+  organizationId String
+  recipientUserId String
+  type String
+  title String
+  body String
+  resourceType String?
+  resourceId String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+  @@index([organizationId, recipientUserId, createdAt])
+  @@index([organizationId, recipientUserId, readAt])
+}
+
+model NotificationDelivery {
+  id String @id @default(cuid())
+  organizationId String
+  notificationId String
+  channel String
+  status String @default("PENDING")
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  sentAt DateTime?
+  lastError String?
+  idempotencyKey String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  @@index([availableAt, sentAt])
+  @@index([organizationId, status])
 }
