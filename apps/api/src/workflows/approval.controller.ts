@@ -1,17 +1,21 @@
-import { Controller, Get, Headers, UseGuards } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '@hrm/auth';
 import { ApprovalService } from './approval.service';
+import { TenantGuard } from '../organizations/tenant.guard';
+import { PermissionGuard } from '../authorization/permission.guard';
+import { RequirePermission } from '../authorization/permission.decorator';
+import type { TenantRequest } from '../organizations/organization-context';
 
 @Controller('approvals')
-@UseGuards(AuthGuard)
+@UseGuards(TenantGuard, PermissionGuard)
 export class ApprovalController {
   constructor(private readonly approvalService: ApprovalService) {}
 
   @Get('pending')
-  listPending(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.approvalService.listPendingForApprover(organizationId, user.id);
+  @RequirePermission('leave', 'approve')
+  listPending(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser) {
+    return this.approvalService.listPendingForApprover(req.tenant!.id, user.id);
   }
 }
