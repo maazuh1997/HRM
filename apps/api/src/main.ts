@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { Controller, Get, Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationModule } from './organizations/organization.module';
+import { LicenseModule } from './licensing/license.module';
 
 @Controller('health')
 class HealthController {
@@ -13,7 +14,7 @@ class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule, OrganizationModule], controllers: [HealthController] })
+@Module({ imports: [AuthModule, OrganizationModule, LicenseModule], controllers: [HealthController] })
 class AppModule {}
 
 async function bootstrap() {
