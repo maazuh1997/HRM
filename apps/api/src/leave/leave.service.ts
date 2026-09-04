@@ -2,10 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
 import { ApprovalService } from '../workflows/approval.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class LeaveService {
-  constructor(private readonly approvalService: ApprovalService) {}
+  constructor(private readonly approvalService: ApprovalService, private readonly auditService: AuditService) {}
 
   private normalizeDate(value: string): Date {
     const date = new Date(value);
@@ -56,13 +57,17 @@ export class LeaveService {
       if (available < days) throw new BadRequestException('Insufficient leave balance');
       const request = await tx.leaveRequest.create({ data: { organizationId, employeeId, leaveTypeId, startDate, endDate, workingDays: new Prisma.Decimal(days), reason: reason?.trim() || undefined } });
       await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { increment: new Prisma.Decimal(days) } } });
+      await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_REQUEST_CREATED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { employeeId, leaveTypeId, startDate: startDate.toISOString(), endDate: endDate.toISOString(), workingDays: days } });
       if (leaveType.requiresApproval) {
         const manager = employee.managerId ? await tx.employee.findFirst({ where: { id: employee.managerId, organizationId }, select: { userId: true } }) : null;
         if (!manager?.userId) throw new BadRequestException('No manager is configured for leave approval');
         if (!createdByUserId) throw new BadRequestException('Workflow creator is required');
         await this.approvalService.createWorkflowInTransaction(tx, organizationId, 'LEAVE_REQUEST', request.id, createdByUserId, [manager.userId]);
+        await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_APPROVAL_STARTED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { approverUserId: manager.userId } });
       } else {
         await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
+        await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_BALANCE_CONSUMED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: days } });
+        await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_APPROVED', resourceType: 'LEAVE_REQUEST', resourceId: request.id });
         return tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'APPROVED', decidedAt: new Date() } });
       }
       return request;
@@ -88,10 +93,10 @@ export class LeaveService {
 
   async cancelRequestForUser(organizationId: string, userId: string, requestId: string) {
     const employee = await this.employeeForUser(organizationId, userId);
-    return this.cancelRequest(organizationId, employee.id, requestId);
+    return this.cancelRequest(organizationId, employee.id, requestId, userId);
   }
 
-  async cancelRequest(organizationId: string, employeeId: string, requestId: string) {
+  async cancelRequest(organizationId: string, employeeId: string, requestId: string, actorUserId?: string) {
     return prisma.$transaction(async (tx) => {
       const request = await tx.leaveRequest.findFirst({ where: { id: requestId, organizationId, employeeId } });
       if (!request) throw new NotFoundException('Leave request not found');
@@ -101,6 +106,8 @@ export class LeaveService {
       const updated = await tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
       const year = request.startDate.getUTCFullYear();
       await tx.leaveBalance.updateMany({ where: { organizationId, employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
+      await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'LEAVE_BALANCE_RELEASED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: Number(request.workingDays) } });
+      await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'LEAVE_CANCELLED', resourceType: 'LEAVE_REQUEST', resourceId: request.id });
       return updated;
     });
   }
