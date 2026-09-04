@@ -11,7 +11,12 @@ class CreateLeaveRequestDto {
   reason?: string;
 }
 
-@Controller('leave/requests')
+class LeaveDecisionDto {
+  decision!: 'APPROVED' | 'REJECTED';
+  note?: string;
+}
+
+@Controller('api/v1/leave/requests')
 @UseGuards(AuthGuard)
 export class LeaveController {
   constructor(private readonly service: LeaveService) {}
@@ -34,5 +39,17 @@ export class LeaveController {
   ) {
     if (!organizationId) throw new Error('Organization context is required');
     return this.service.cancelRequestForUser(organizationId, user.id, requestId);
+  }
+
+  @Post(':requestId/decision')
+  decide(
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers('x-organization-id') organizationId: string,
+    @Param('requestId') requestId: string,
+    @Body() body: LeaveDecisionDto,
+  ) {
+    if (!organizationId) throw new Error('Organization context is required');
+    if (body.decision !== 'APPROVED' && body.decision !== 'REJECTED') throw new Error('Invalid leave decision');
+    return this.service.decide(organizationId, requestId, user.id, body.decision, body.note);
   }
 }
