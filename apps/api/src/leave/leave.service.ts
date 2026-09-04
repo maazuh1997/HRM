@@ -1,11 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
-import { LeaveApprovalService } from './leave.approval.service';
+import { ApprovalService } from '../workflows/approval.service';
 
 @Injectable()
 export class LeaveService {
-  constructor(private readonly approvalService: LeaveApprovalService) {}
+  constructor(private readonly approvalService: ApprovalService) {}
 
   private normalizeDate(value: string): Date {
     const date = new Date(value);
@@ -42,7 +42,6 @@ export class LeaveService {
     const endDate = this.normalizeDate(end);
     const days = this.workingDays(startDate, endDate);
     if (days <= 0) throw new BadRequestException('Leave request must contain at least one working day');
-
     return prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findFirst({ where: { id: employeeId, organizationId, status: { not: 'TERMINATED' } } });
       if (!employee) throw new NotFoundException('Employee not found');
@@ -57,14 +56,12 @@ export class LeaveService {
       if (available < days) throw new BadRequestException('Insufficient leave balance');
       const request = await tx.leaveRequest.create({ data: { organizationId, employeeId, leaveTypeId, startDate, endDate, workingDays: new Prisma.Decimal(days), reason: reason?.trim() || undefined } });
       await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { increment: new Prisma.Decimal(days) } } });
-      const approvers: string[] = [];
       if (leaveType.requiresApproval) {
         const manager = employee.managerId ? await tx.employee.findFirst({ where: { id: employee.managerId, organizationId }, select: { userId: true } }) : null;
         if (!manager?.userId) throw new BadRequestException('No manager is configured for leave approval');
-        approvers.push(manager.userId);
-      }
-      if (approvers.length && createdByUserId) await this.approvalService.createWorkflowInTransaction(tx, organizationId, 'LEAVE_REQUEST', request.id, createdByUserId, approvers);
-      else if (!approvers.length) {
+        if (!createdByUserId) throw new BadRequestException('Workflow creator is required');
+        await this.approvalService.createWorkflowInTransaction(tx, organizationId, 'LEAVE_REQUEST', request.id, createdByUserId, [manager.userId]);
+      } else {
         await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
         return tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'APPROVED', decidedAt: new Date() } });
       }
@@ -109,6 +106,6 @@ export class LeaveService {
   }
 
   async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
-    return this.approvalService.decideLeaveRequest(organizationId, requestId, approverUserId, decision, note);
+    return this.approvalService.decide(organizationId, requestId, approverUserId, decision, note);
   }
 }
