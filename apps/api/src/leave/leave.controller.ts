@@ -1,8 +1,11 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '../auth/auth.guard';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { LeaveService } from './leave.service';
+import { TenantGuard } from '../organizations/tenant.guard';
+import { PermissionGuard } from '../authorization/permission.guard';
+import { RequirePermission } from '../authorization/permission.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '@hrm/auth';
-import { LeaveService } from './leave.service';
+import type { TenantRequest } from '../organizations/organization-context';
 
 class CreateLeaveRequestDto {
   leaveTypeId!: string;
@@ -17,44 +20,38 @@ class LeaveDecisionDto {
 }
 
 @Controller('leave/requests')
-@UseGuards(AuthGuard)
+@UseGuards(TenantGuard, PermissionGuard)
 export class LeaveController {
   constructor(private readonly service: LeaveService) {}
 
   @Post()
-  create(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string, @Body() body: CreateLeaveRequestDto) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.service.createRequestForUser(organizationId, user.id, body.leaveTypeId, body.startDate, body.endDate, body.reason);
+  @RequirePermission('leave', 'request')
+  create(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser, @Body() body: CreateLeaveRequestDto) {
+    return this.service.createRequestForUser(req.tenant!.id, user.id, body.leaveTypeId, body.startDate, body.endDate, body.reason);
   }
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.service.listForUser(organizationId, user.id);
+  @RequirePermission('leave', 'read')
+  list(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.listForUser(req.tenant!.id, user.id);
   }
 
   @Get(':requestId')
-  get(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string, @Param('requestId') requestId: string) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.service.getForUser(organizationId, user.id, requestId);
-  }
-
-  @Get('../balances')
-  balances(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.service.getBalancesForUser(organizationId, user.id);
+  @RequirePermission('leave', 'read')
+  get(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser, @Param('requestId') requestId: string) {
+    return this.service.getForUser(req.tenant!.id, user.id, requestId);
   }
 
   @Patch(':requestId/cancel')
-  cancel(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string, @Param('requestId') requestId: string) {
-    if (!organizationId) throw new Error('Organization context is required');
-    return this.service.cancelRequestForUser(organizationId, user.id, requestId);
+  @RequirePermission('leave', 'request')
+  cancel(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser, @Param('requestId') requestId: string) {
+    return this.service.cancelRequestForUser(req.tenant!.id, user.id, requestId);
   }
 
   @Post(':requestId/decision')
-  decide(@CurrentUser() user: AuthenticatedUser, @Headers('x-organization-id') organizationId: string, @Param('requestId') requestId: string, @Body() body: LeaveDecisionDto) {
-    if (!organizationId) throw new Error('Organization context is required');
+  @RequirePermission('leave', 'approve')
+  decide(@Req() req: TenantRequest, @CurrentUser() user: AuthenticatedUser, @Param('requestId') requestId: string, @Body() body: LeaveDecisionDto) {
     if (body.decision !== 'APPROVED' && body.decision !== 'REJECTED') throw new Error('Invalid leave decision');
-    return this.service.decide(organizationId, requestId, user.id, body.decision, body.note);
+    return this.service.decide(req.tenant!.id, requestId, user.id, body.decision, body.note);
   }
 }
