@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 
 export type ApprovalTransaction = Prisma.TransactionClient;
+export type ApprovalDecision = 'APPROVED' | 'REJECTED';
 
 @Injectable()
 export class ApprovalService {
@@ -26,7 +27,7 @@ export class ApprovalService {
     return workflow;
   }
 
-  async decide(organizationId: string, workflowId: string, actorUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
+  async decide(organizationId: string, workflowId: string, actorUserId: string, decision: ApprovalDecision, note?: string, finalize?: (tx: ApprovalTransaction, workflow: any) => Promise<unknown>) {
     return prisma.$transaction(async (tx) => {
       const workflow = await tx.approvalWorkflow.findFirst({ where: { id: workflowId, organizationId }, include: { steps: { orderBy: { sequence: 'asc' } } } });
       if (!workflow) throw new NotFoundException('Approval workflow not found');
@@ -36,15 +37,19 @@ export class ApprovalService {
       await tx.approvalStep.update({ where: { id: current.id }, data: { status: decision, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
       await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: decision === 'APPROVED' ? 'APPROVAL_STEP_APPROVED' : 'APPROVAL_STEP_REJECTED', resourceType: workflow.resourceType, resourceId: workflow.resourceId, metadata: { workflowId: workflow.id, stepId: current.id, sequence: current.sequence, note: note?.trim() || null } });
       if (decision === 'REJECTED') {
-        return tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'REJECTED', completedAt: new Date() } });
+        const completed = await tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'REJECTED', completedAt: new Date() } });
+        if (finalize) await finalize(tx, completed);
+        return completed;
       }
       const next = workflow.steps.find((step) => step.sequence === current.sequence + 1);
       if (next) {
         await tx.approvalStep.update({ where: { id: next.id }, data: { status: 'PENDING' } });
         return workflow;
       }
+      const completed = await tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'APPROVED', completedAt: new Date() } });
       await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'APPROVAL_WORKFLOW_APPROVED', resourceType: workflow.resourceType, resourceId: workflow.resourceId, metadata: { workflowId: workflow.id } });
-      return tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'APPROVED', completedAt: new Date() } });
+      if (finalize) await finalize(tx, completed);
+      return completed;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
