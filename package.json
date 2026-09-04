@@ -1,0 +1,21 @@
+{
+  "name": "hrm",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm turbo run build",
+    "dev": "pnpm turbo run dev --parallel",
+    "lint": "pnpm turbo run lint",
+    "typecheck": "pnpm turbo run typecheck",
+    "test": "pnpm turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "turbo": "2.5.6"
+  }
+}
