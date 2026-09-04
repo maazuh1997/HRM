@@ -16,10 +16,12 @@ type SmtpConfig = {
 
 @Injectable()
 export class SmtpEmailProvider implements EmailProvider {
-  private readonly transporter: Transporter;
+  private readonly transporter?: Transporter;
+  private readonly from?: string;
 
   constructor() {
     const config = this.readConfig();
+    if (!config) return;
     this.transporter = createTransport({
       host: config.host,
       port: config.port,
@@ -32,16 +34,16 @@ export class SmtpEmailProvider implements EmailProvider {
     this.from = config.from;
   }
 
-  private readonly from: string;
-
   async send(message: EmailMessage) {
+    if (!this.transporter || !this.from) throw new Error('SMTP email delivery is not configured');
     await this.transporter.sendMail({ from: this.from, to: message.to, subject: message.subject, text: message.text });
   }
 
-  private readConfig(): SmtpConfig {
+  private readConfig(): SmtpConfig | undefined {
     const host = process.env.SMTP_HOST?.trim();
     const from = process.env.SMTP_FROM?.trim();
-    if (!host || !from) throw new Error('SMTP_HOST and SMTP_FROM are required when SMTP email delivery is enabled');
+    if (!host && !from) return undefined;
+    if (!host || !from) throw new Error('SMTP_HOST and SMTP_FROM must both be configured');
     const port = Number(process.env.SMTP_PORT ?? 587);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SMTP_PORT must be a valid TCP port');
     const secure = (process.env.SMTP_SECURE ?? 'false').toLowerCase() === 'true';
