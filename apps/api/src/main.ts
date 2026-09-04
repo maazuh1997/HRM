@@ -5,6 +5,8 @@ import { Controller, Get, Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationModule } from './organizations/organization.module';
 import { LicenseModule } from './licensing/license.module';
+import { LeaveModule } from './leave/leave.module';
+import { ApprovalModule } from './workflows/approval.module';
 
 @Controller('health')
 class HealthController {
@@ -14,7 +16,7 @@ class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule, OrganizationModule, LicenseModule], controllers: [HealthController] })
+@Module({ imports: [AuthModule, OrganizationModule, LicenseModule, ApprovalModule, LeaveModule], controllers: [HealthController] })
 class AppModule {}
 
 async function bootstrap() {
