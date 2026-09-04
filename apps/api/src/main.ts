@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import { Controller, Get, Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
+import { OrganizationModule } from './organizations/organization.module';
 
 @Controller('health')
 class HealthController {
@@ -12,7 +13,7 @@ class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [HealthController] })
+@Module({ imports: [AuthModule, OrganizationModule], controllers: [HealthController] })
 class AppModule {}
 
 async function bootstrap() {
