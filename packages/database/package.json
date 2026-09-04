@@ -1,0 +1,22 @@
+{
+  "name": "@hrm/database",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.16.2"
+  },
+  "devDependencies": {
+    "prisma": "6.16.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
