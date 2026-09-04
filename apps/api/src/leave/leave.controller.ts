@@ -5,7 +5,6 @@ import type { AuthenticatedUser } from '@hrm/auth';
 import { LeaveService } from './leave.service';
 
 class CreateLeaveRequestDto {
-  employeeId!: string;
   leaveTypeId!: string;
   startDate!: string;
   endDate!: string;
@@ -18,9 +17,13 @@ export class LeaveController {
   constructor(private readonly service: LeaveService) {}
 
   @Post()
-  create(@Headers('x-organization-id') organizationId: string, @Body() body: CreateLeaveRequestDto) {
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers('x-organization-id') organizationId: string,
+    @Body() body: CreateLeaveRequestDto,
+  ) {
     if (!organizationId) throw new Error('Organization context is required');
-    return this.service.createRequest(organizationId, body.employeeId, body.leaveTypeId, body.startDate, body.endDate, body.reason);
+    return this.service.createRequestForUser(organizationId, user.id, body.leaveTypeId, body.startDate, body.endDate, body.reason);
   }
 
   @Patch(':requestId/cancel')
@@ -30,6 +33,6 @@ export class LeaveController {
     @Param('requestId') requestId: string,
   ) {
     if (!organizationId) throw new Error('Organization context is required');
-    return this.service.cancelRequest(organizationId, user.id, requestId);
+    return this.service.cancelRequestForUser(organizationId, user.id, requestId);
   }
 }
