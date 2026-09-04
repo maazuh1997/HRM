@@ -3,10 +3,12 @@ import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
 import { ApprovalService, ApprovalTransaction } from '../workflows/approval.service';
 import { AuditService } from '../audit/audit.service';
+import { OutboxService } from '../events/outbox.service';
+import { DomainEventType } from '../events/domain-event';
 
 @Injectable()
 export class LeaveService {
-  constructor(private readonly approvalService: ApprovalService, private readonly auditService: AuditService) {}
+  constructor(private readonly approvalService: ApprovalService, private readonly auditService: AuditService, private readonly outboxService: OutboxService) {}
 
   private normalizeDate(value: string): Date {
     const date = new Date(value);
@@ -58,17 +60,21 @@ export class LeaveService {
       const request = await tx.leaveRequest.create({ data: { organizationId, employeeId, leaveTypeId, startDate, endDate, workingDays: new Prisma.Decimal(days), reason: reason?.trim() || undefined } });
       await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { increment: new Prisma.Decimal(days) } } });
       await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_REQUEST_CREATED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { employeeId, leaveTypeId, startDate: startDate.toISOString(), endDate: endDate.toISOString(), workingDays: days } });
+      await this.outboxService.enqueueInTransaction(tx, { type: DomainEventType.LeaveRequestCreated, organizationId, actorUserId: createdByUserId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, occurredAt: new Date(), payload: { employeeId, leaveTypeId, startDate: startDate.toISOString(), endDate: endDate.toISOString(), workingDays: days } });
       if (leaveType.requiresApproval) {
         const manager = employee.managerId ? await tx.employee.findFirst({ where: { id: employee.managerId, organizationId }, select: { userId: true } }) : null;
         if (!manager?.userId) throw new BadRequestException('No manager is configured for leave approval');
         if (!createdByUserId) throw new BadRequestException('Workflow creator is required');
         await this.approvalService.createWorkflowInTransaction(tx, organizationId, 'LEAVE_REQUEST', request.id, createdByUserId, [manager.userId]);
         await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_APPROVAL_STARTED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { approverUserId: manager.userId } });
+        await this.outboxService.enqueueInTransaction(tx, { type: DomainEventType.LeaveApprovalRequired, organizationId, actorUserId: createdByUserId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, occurredAt: new Date(), payload: { employeeId, approverUserId: manager.userId, leaveTypeId, startDate: startDate.toISOString(), endDate: endDate.toISOString(), workingDays: days } });
       } else {
         await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
         await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_BALANCE_CONSUMED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: days } });
         await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'LEAVE_APPROVED', resourceType: 'LEAVE_REQUEST', resourceId: request.id });
-        return tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'APPROVED', decidedAt: new Date() } });
+        const approved = await tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'APPROVED', decidedAt: new Date() } });
+        await this.outboxService.enqueueInTransaction(tx, { type: DomainEventType.LeaveApproved, organizationId, actorUserId: createdByUserId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, occurredAt: new Date(), payload: { employeeId, leaveTypeId, workingDays: days } });
+        return approved;
       }
       return request;
     });
@@ -108,6 +114,7 @@ export class LeaveService {
       await tx.leaveBalance.updateMany({ where: { organizationId, employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
       await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'LEAVE_BALANCE_RELEASED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: Number(request.workingDays) } });
       await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'LEAVE_CANCELLED', resourceType: 'LEAVE_REQUEST', resourceId: request.id });
+      await this.outboxService.enqueueInTransaction(tx, { type: DomainEventType.LeaveCancelled, organizationId, actorUserId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, occurredAt: new Date(), payload: { employeeId, leaveTypeId: request.leaveTypeId, workingDays: Number(request.workingDays) } });
       return updated;
     });
   }
@@ -132,6 +139,8 @@ export class LeaveService {
       await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_BALANCE_RELEASED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: Number(request.workingDays) } });
       await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_REJECTED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { note: note?.trim() || null } });
     }
-    return tx.leaveRequest.update({ where: { id: request.id }, data: { status: decision, approverUserId: actorUserId, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
+    const updated = await tx.leaveRequest.update({ where: { id: request.id }, data: { status: decision, approverUserId: actorUserId, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
+    await this.outboxService.enqueueInTransaction(tx, { type: decision === 'APPROVED' ? DomainEventType.LeaveApproved : DomainEventType.LeaveRejected, organizationId: request.organizationId, actorUserId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, occurredAt: new Date(), payload: { employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, workingDays: Number(request.workingDays), note: note?.trim() || null } });
+    return updated;
   }
 }
