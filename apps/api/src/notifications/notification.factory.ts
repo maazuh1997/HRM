@@ -24,7 +24,7 @@ export class NotificationFactory {
     if (recipients.length !== recipientUserIds.length) throw new BadRequestException('One or more notification recipients are not active members of the organization');
     const created: Array<{ id: string; recipientUserId: string }> = [];
     for (const recipientUserId of recipients.map((recipient) => recipient.id)) {
-      const notificationId = createHash('sha256').update(`${event.idempotencyKey ?? `${event.type}:${event.resourceType}:${event.resourceId}:${event.occurredAt.toISOString()}`}:${recipientUserId}`).digest('hex');
+      const notificationId = createHash('sha256').update(`${event.type}:${event.resourceType}:${event.resourceId}:${event.occurredAt.toISOString()}:${recipientUserId}`).digest('hex');
       const notification = await tx.notification.upsert({
         where: { id: notificationId },
         create: { id: notificationId, organizationId: event.organizationId, recipientUserId, type: definition.type, title: definition.title.trim(), body: definition.body.trim(), resourceType: event.resourceType, resourceId: event.resourceId },
