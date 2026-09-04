@@ -35,6 +35,7 @@ model Organization {
   leaveRequests LeaveRequest[]
   approvalWorkflows ApprovalWorkflow[]
   auditLogs AuditLog[]
+  outboxEvents OutboxEvent[]
   @@index([createdAt])
 }
 
@@ -55,6 +56,7 @@ model User {
   createdApprovalWorkflows ApprovalWorkflow[] @relation("ApprovalWorkflowCreator")
   approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
   auditLogs AuditLog[] @relation("AuditLogActor")
+  outboxEvents OutboxEvent[] @relation("OutboxEventActor")
   @@index([status])
   @@index([createdAt])
 }
@@ -393,4 +395,26 @@ model AuditLog {
   @@index([organizationId, resourceType, resourceId])
   @@index([organizationId, actorUserId, occurredAt])
   @@index([organizationId, action, occurredAt])
+}
+
+model OutboxEvent {
+  id String @id @default(cuid())
+  organizationId String
+  type String
+  resourceType String
+  resourceId String
+  actorUserId String?
+  payload Json
+  occurredAt DateTime @default(now())
+  availableAt DateTime @default(now())
+  processedAt DateTime?
+  attempts Int @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor User? @relation("OutboxEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  @@index([availableAt, processedAt])
+  @@index([organizationId, createdAt])
+  @@index([type, resourceType, resourceId])
 }
