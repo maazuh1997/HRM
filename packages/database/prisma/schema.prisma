@@ -7,6 +7,375 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum MembershipStatus { INVITED ACTIVE SUSPENDED REMOVED }
+enum UserStatus { ACTIVE SUSPENDED DEACTIVATED }
+enum LicenseStatus { ACTIVE EXPIRED REVOKED SUSPENDED }
+enum InvitationStatus { PENDING ACCEPTED EXPIRED REVOKED }
+enum EmployeeStatus { ACTIVE ON_LEAVE SUSPENDED TERMINATED }
+enum EmploymentType { FULL_TIME PART_TIME CONTRACT INTERN TEMPORARY }
+enum LeaveRequestStatus { PENDING APPROVED REJECTED CANCELLED }
+enum ApprovalStatus { PENDING APPROVED REJECTED CANCELLED }
+
+model Organization {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships Membership[]
+  roles Role[]
+  licenses License[]
+  invitations Invitation[]
+  employees Employee[]
+  departments Department[]
+  positions Position[]
+  history EmployeeHistory[]
+  leaveTypes LeaveType[]
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]
+  approvalWorkflows ApprovalWorkflow[]
+  auditLogs AuditLog[]
+  @@index([createdAt])
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String?
+  status UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships Membership[]
+  sessions Session[]
+  invitations Invitation[]
+  employee Employee?
+  employeeHistory EmployeeHistory[] @relation("HistoryActor")
+  leaveApprovals LeaveRequest[] @relation("LeaveApprover")
+  createdApprovalWorkflows ApprovalWorkflow[] @relation("ApprovalWorkflowCreator")
+  approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
+  auditLogs AuditLog[] @relation("AuditLogActor")
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Session {
+  id String @id @default(cuid())
+  userId String
+  tokenHash String @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+model Membership {
+  id String @id @default(cuid())
+  organizationId String
+  userId String
+  status MembershipStatus @default(INVITED)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles MembershipRole[]
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, status])
+}
+
+model Invitation {
+  id String @id @default(cuid())
+  organizationId String
+  email String
+  tokenHash String @unique
+  roleId String?
+  invitedById String
+  userId String?
+  status InvitationStatus @default(PENDING)
+  expiresAt DateTime
+  acceptedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy User @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role Role? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  @@index([organizationId, status])
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model Department {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  code String?
+  description String?
+  parentId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent Department? @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Department[] @relation("DepartmentHierarchy")
+  employees Employee[]
+  positions Position[]
+  @@unique([organizationId, name])
+  @@unique([organizationId, code])
+  @@index([organizationId, parentId])
+}
+
+model Position {
+  id String @id @default(cuid())
+  organizationId String
+  departmentId String?
+  title String
+  code String?
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees Employee[]
+  @@unique([organizationId, title])
+  @@unique([organizationId, code])
+  @@index([organizationId, departmentId])
+}
+
+model Employee {
+  id String @id @default(cuid())
+  organizationId String
+  userId String? @unique
+  employeeNumber String
+  firstName String
+  lastName String
+  preferredName String?
+  workEmail String?
+  personalEmail String?
+  phone String?
+  dateOfBirth DateTime?
+  gender String?
+  jobTitle String?
+  departmentId String?
+  positionId String?
+  location String?
+  managerId String?
+  employmentType EmploymentType @default(FULL_TIME)
+  status EmployeeStatus @default(ACTIVE)
+  hireDate DateTime?
+  terminationDate DateTime?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  manager Employee? @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports Employee[] @relation("EmployeeManager")
+  history EmployeeHistory[]
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]
+  @@unique([organizationId, employeeNumber])
+  @@index([organizationId, status])
+  @@index([organizationId, departmentId])
+  @@index([organizationId, positionId])
+  @@index([organizationId, managerId])
+  @@index([organizationId, hireDate])
+}
+
+model EmployeeHistory {
+  id String @id @default(cuid())
+  organizationId String
+  employeeId String
+  actorUserId String
+  type String
+  previousValue String? @db.Text
+  newValue String? @db.Text
+  occurredAt DateTime @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  actor User @relation("HistoryActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  @@index([organizationId, employeeId, occurredAt])
+  @@index([organizationId, type, occurredAt])
+}
+
+model LeaveType {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  code String
+  description String?
+  paid Boolean @default(true)
+  requiresApproval Boolean @default(true)
+  annualAllocation Decimal? @db.Decimal(10, 2)
+  allowCarryForward Boolean @default(false)
+  carryForwardLimit Decimal? @db.Decimal(10, 2)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  balances LeaveBalance[]
+  requests LeaveRequest[]
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
+model LeaveBalance {
+  id String @id @default(cuid())
+  organizationId String
+  employeeId String
+  leaveTypeId String
+  year Int
+  allocated Decimal @default(0) @db.Decimal(10, 2)
+  carried Decimal @default(0) @db.Decimal(10, 2)
+  used Decimal @default(0) @db.Decimal(10, 2)
+  pending Decimal @default(0) @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  @@unique([employeeId, leaveTypeId, year])
+  @@index([organizationId, employeeId, year])
+  @@index([organizationId, leaveTypeId, year])
+}
+
+model LeaveRequest {
+  id String @id @default(cuid())
+  organizationId String
+  employeeId String
+  leaveTypeId String
+  startDate DateTime
+  endDate DateTime
+  workingDays Decimal @db.Decimal(10, 2)
+  reason String?
+  status LeaveRequestStatus @default(PENDING)
+  approverUserId String?
+  submittedAt DateTime @default(now())
+  decidedAt DateTime?
+  decisionNote String?
+  cancelledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  approver User? @relation("LeaveApprover", fields: [approverUserId], references: [id], onDelete: SetNull)
+  @@index([organizationId, employeeId, status])
+  @@index([organizationId, approverUserId, status])
+  @@index([organizationId, startDate, endDate])
+}
+
+model ApprovalWorkflow {
+  id String @id @default(cuid())
+  organizationId String
+  resourceType String
+  resourceId String
+  status ApprovalStatus @default(PENDING)
+  createdByUserId String
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy User @relation("ApprovalWorkflowCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  steps ApprovalStep[]
+  @@unique([resourceType, resourceId])
+  @@index([organizationId, status])
+  @@index([organizationId, resourceType, resourceId])
+}
+
+model ApprovalStep {
+  id String @id @default(cuid())
+  workflowId String
+  sequence Int
+  approverUserId String
+  status ApprovalStatus @default(PENDING)
+  decidedAt DateTime?
+  decisionNote String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workflow ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  approver User @relation("ApprovalStepApprover", fields: [approverUserId], references: [id], onDelete: Restrict)
+  @@unique([workflowId, sequence])
+  @@index([approverUserId, status])
+}
+
+model Role {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  description String?
+  isSystem Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships MembershipRole[]
+  permissions RolePermission[]
+  invitations Invitation[]
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Permission {
+  id String @id @default(cuid())
+  resource String
+  action String
+  description String?
+  createdAt DateTime @default(now())
+  roles RolePermission[]
+  @@unique([resource, action])
+  @@index([resource])
+}
+
+model MembershipRole {
+  membershipId String
+  roleId String
+  createdAt DateTime @default(now())
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([membershipId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId String
+  permissionId String
+  createdAt DateTime @default(now())
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model License {
+  id String @id @default(cuid())
+  organizationId String
+  licenseId String @unique
+  keyId String
+  status LicenseStatus @default(ACTIVE)
+  edition String
+  deployment String
+  issuedAt DateTime
+  expiresAt DateTime
+  maxHrUsers Int
+  maxEmployees Int
+  entitlements Json
+  payload String @db.Text
+  signature String @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, status])
+  @@index([expiresAt])
+}
+
 model AuditLog {
   id String @id @default(cuid())
   organizationId String
