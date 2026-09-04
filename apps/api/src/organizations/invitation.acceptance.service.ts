@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { prisma } from '@hrm/database';
-import { createSessionToken, hashSessionToken } from '@hrm/auth';
+import { createSessionToken, hashPassword, hashSessionToken } from '@hrm/auth';
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
@@ -26,9 +26,10 @@ export class InvitationAcceptanceService {
       }
 
       const existingUser = await tx.user.findUnique({ where: { email: invitation.email } });
+      const passwordHash = await hashPassword(password);
       const user = existingUser
-        ? await tx.user.update({ where: { id: existingUser.id }, data: { status: 'ACTIVE' } })
-        : await tx.user.create({ data: { email: invitation.email, passwordHash: password } });
+        ? await tx.user.update({ where: { id: existingUser.id }, data: { status: 'ACTIVE', passwordHash } })
+        : await tx.user.create({ data: { email: invitation.email, passwordHash } });
 
       const membership = await tx.membership.upsert({
         where: { organizationId_userId: { organizationId: invitation.organizationId, userId: user.id } },
