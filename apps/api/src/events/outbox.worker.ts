@@ -5,6 +5,7 @@ import type { DomainEvent } from './domain-event';
 
 const BATCH_SIZE = 25;
 const MAX_ATTEMPTS = 10;
+const LEASE_SECONDS = 300;
 
 @Injectable()
 export class OutboxWorker {
@@ -13,15 +14,20 @@ export class OutboxWorker {
   constructor(private readonly eventBus: DomainEventBus) {}
 
   async processBatch() {
+    const now = new Date();
     const claimed = await prisma.$transaction(async (tx) => {
-      const events = await tx.outboxEvent.findMany({
-        where: { processedAt: null, availableAt: { lte: new Date() }, attempts: { lt: MAX_ATTEMPTS } },
-        orderBy: [{ availableAt: 'asc' }, { createdAt: 'asc' }],
-        take: BATCH_SIZE,
-      });
-      const ids = events.map((event) => event.id);
-      if (!ids.length) return [];
-      await tx.outboxEvent.updateMany({ where: { id: { in: ids }, processedAt: null }, data: { attempts: { increment: 1 } } });
+      const events = await tx.$queryRaw<Array<{ id: string; organizationId: string; type: string; resourceType: string; resourceId: string; actorUserId: string | null; payload: unknown; occurredAt: Date }>>`
+        SELECT "id", "organizationId", "type", "resourceType", "resourceId", "actorUserId", "payload", "occurredAt"
+        FROM "OutboxEvent"
+        WHERE "processedAt" IS NULL
+          AND "availableAt" <= ${now}
+          AND "attempts" < ${MAX_ATTEMPTS}
+        ORDER BY "availableAt" ASC, "createdAt" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${BATCH_SIZE}
+      `;
+      if (!events.length) return [];
+      await tx.outboxEvent.updateMany({ where: { id: { in: events.map((event) => event.id) }, processedAt: null }, data: { attempts: { increment: 1 }, availableAt: new Date(Date.now() + LEASE_SECONDS * 1000) } });
       return events;
     });
 
