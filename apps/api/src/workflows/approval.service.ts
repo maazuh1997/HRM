@@ -1,11 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 
 export type ApprovalTransaction = Prisma.TransactionClient;
 
 @Injectable()
 export class ApprovalService {
+  constructor(private readonly auditService: AuditService) {}
+
   async createWorkflow(organizationId: string, resourceType: string, resourceId: string, createdByUserId: string, approverUserIds: string[]) {
     return prisma.$transaction((tx) => this.createWorkflowInTransaction(tx, organizationId, resourceType, resourceId, createdByUserId, approverUserIds));
   }
@@ -19,6 +22,7 @@ export class ApprovalService {
     if (existing) return existing;
     const workflow = await tx.approvalWorkflow.create({ data: { organizationId, resourceType, resourceId, createdByUserId } });
     await tx.approvalStep.createMany({ data: uniqueApprovers.map((approverUserId, index) => ({ workflowId: workflow.id, sequence: index + 1, approverUserId })) });
+    await this.auditService.recordInTransaction(tx, { organizationId, actorUserId: createdByUserId, action: 'APPROVAL_WORKFLOW_CREATED', resourceType, resourceId, metadata: { approverUserIds: uniqueApprovers } });
     return workflow;
   }
 
@@ -30,12 +34,16 @@ export class ApprovalService {
       const current = workflow.steps.find((step) => step.status === 'PENDING');
       if (!current || current.approverUserId !== actorUserId) throw new BadRequestException('You are not the current approver');
       await tx.approvalStep.update({ where: { id: current.id }, data: { status: decision, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
-      if (decision === 'REJECTED') return tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'REJECTED', completedAt: new Date() } });
+      await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: decision === 'APPROVED' ? 'APPROVAL_STEP_APPROVED' : 'APPROVAL_STEP_REJECTED', resourceType: workflow.resourceType, resourceId: workflow.resourceId, metadata: { workflowId: workflow.id, stepId: current.id, sequence: current.sequence, note: note?.trim() || null } });
+      if (decision === 'REJECTED') {
+        return tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'REJECTED', completedAt: new Date() } });
+      }
       const next = workflow.steps.find((step) => step.sequence === current.sequence + 1);
       if (next) {
         await tx.approvalStep.update({ where: { id: next.id }, data: { status: 'PENDING' } });
         return workflow;
       }
+      await this.auditService.recordInTransaction(tx, { organizationId, actorUserId, action: 'APPROVAL_WORKFLOW_APPROVED', resourceType: workflow.resourceType, resourceId: workflow.resourceId, metadata: { workflowId: workflow.id } });
       return tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'APPROVED', completedAt: new Date() } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
