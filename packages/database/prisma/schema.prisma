@@ -27,6 +27,13 @@ enum LicenseStatus {
   SUSPENDED
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 model Organization {
   id          String        @id @default(cuid())
   name        String
@@ -36,6 +43,7 @@ model Organization {
   memberships Membership[]
   roles       Role[]
   licenses    License[]
+  invitations Invitation[]
 
   @@index([createdAt])
 }
@@ -50,6 +58,7 @@ model User {
   updatedAt       DateTime      @updatedAt
   memberships     Membership[]
   sessions        Session[]
+  invitations     Invitation[]
 
   @@index([status])
   @@index([createdAt])
@@ -86,6 +95,30 @@ model Membership {
   @@index([organizationId, status])
 }
 
+model Invitation {
+  id             String           @id @default(cuid())
+  organizationId String
+  email          String
+  tokenHash      String           @unique
+  roleId         String?
+  invitedById    String
+  userId         String?
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy      User             @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+  user           User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role           Role?            @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([email])
+  @@index([expiresAt])
+}
+
 model Role {
   id             String           @id @default(cuid())
   organizationId String
@@ -97,6 +130,7 @@ model Role {
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   memberships    MembershipRole[]
   permissions    RolePermission[]
+  invitations    Invitation[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
