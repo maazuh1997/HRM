@@ -34,6 +34,21 @@ enum InvitationStatus {
   REVOKED
 }
 
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  TEMPORARY
+}
+
 model Organization {
   id          String        @id @default(cuid())
   name        String
@@ -44,6 +59,7 @@ model Organization {
   roles       Role[]
   licenses    License[]
   invitations Invitation[]
+  employees   Employee[]
 
   @@index([createdAt])
 }
@@ -59,6 +75,7 @@ model User {
   memberships     Membership[]
   sessions        Session[]
   invitations     Invitation[]
+  employee        Employee?
 
   @@index([status])
   @@index([createdAt])
@@ -117,6 +134,42 @@ model Invitation {
   @@index([organizationId, status])
   @@index([email])
   @@index([expiresAt])
+}
+
+model Employee {
+  id               String         @id @default(cuid())
+  organizationId   String
+  userId           String?        @unique
+  employeeNumber   String
+  firstName        String
+  lastName         String
+  preferredName    String?
+  workEmail        String?
+  personalEmail    String?
+  phone            String?
+  dateOfBirth      DateTime?
+  gender           String?
+  jobTitle         String?
+  department      String?
+  location         String?
+  managerId        String?
+  employmentType   EmploymentType @default(FULL_TIME)
+  status           EmployeeStatus  @default(ACTIVE)
+  hireDate         DateTime?
+  terminationDate  DateTime?
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  manager          Employee?      @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports    Employee[]     @relation("EmployeeManager")
+
+  @@unique([organizationId, employeeNumber])
+  @@index([organizationId, status])
+  @@index([organizationId, department])
+  @@index([organizationId, managerId])
+  @@index([organizationId, hireDate])
 }
 
 model Role {
