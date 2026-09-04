@@ -8,6 +8,7 @@ import { LicenseModule } from './licensing/license.module';
 import { LeaveModule } from './leave/leave.module';
 import { ApprovalModule } from './workflows/approval.module';
 import { AuditModule } from './audit/audit.module';
+import { EventsModule } from './events/events.module';
 
 @Controller('health')
 class HealthController {
@@ -17,7 +18,7 @@ class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule, OrganizationModule, LicenseModule, ApprovalModule, LeaveModule, AuditModule], controllers: [HealthController] })
+@Module({ imports: [EventsModule, AuthModule, OrganizationModule, LicenseModule, ApprovalModule, LeaveModule, AuditModule], controllers: [HealthController] })
 class AppModule {}
 
 async function bootstrap() {
