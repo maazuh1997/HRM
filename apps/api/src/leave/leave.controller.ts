@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '@hrm/auth';
@@ -29,6 +29,34 @@ export class LeaveController {
   ) {
     if (!organizationId) throw new Error('Organization context is required');
     return this.service.createRequestForUser(organizationId, user.id, body.leaveTypeId, body.startDate, body.endDate, body.reason);
+  }
+
+  @Get()
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers('x-organization-id') organizationId: string,
+  ) {
+    if (!organizationId) throw new Error('Organization context is required');
+    return this.service.listForUser(organizationId, user.id);
+  }
+
+  @Get(':requestId')
+  get(
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers('x-organization-id') organizationId: string,
+    @Param('requestId') requestId: string,
+  ) {
+    if (!organizationId) throw new Error('Organization context is required');
+    return this.service.getForUser(organizationId, user.id, requestId);
+  }
+
+  @Get('../balances')
+  balances(
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers('x-organization-id') organizationId: string,
+  ) {
+    if (!organizationId) throw new Error('Organization context is required');
+    return this.service.getBalancesForUser(organizationId, user.id);
   }
 
   @Patch(':requestId/cancel')
