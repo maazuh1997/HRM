@@ -4,7 +4,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '@hrm/auth';
 import { ApprovalService } from './approval.service';
 
-@Controller('api/v1/approvals')
+@Controller('approvals')
 @UseGuards(AuthGuard)
 export class ApprovalController {
   constructor(private readonly approvalService: ApprovalService) {}
