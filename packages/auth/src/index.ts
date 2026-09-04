@@ -13,3 +13,20 @@ export interface AuthSessionStore {
   get(sessionId: string): Promise<SessionContext | null>;
   revoke(sessionId: string): Promise<void>;
 }
+
+export type Permission = {
+  resource: string;
+  action: string;
+};
+
+export function permissionKey(resource: string, action: string): string {
+  return `${resource}:${action}`;
+}
+
+export function hasPermission(permissions: Permission[], required: Permission): boolean {
+  const requiredKey = permissionKey(required.resource, required.action);
+  return permissions.some((permission) => permissionKey(permission.resource, permission.action) === requiredKey);
+}
+
+export { hashPassword, verifyPassword } from './password';
+export { createSessionToken, hashSessionToken } from './session-token';
