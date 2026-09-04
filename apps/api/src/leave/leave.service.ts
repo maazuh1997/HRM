@@ -113,11 +113,11 @@ export class LeaveService {
   }
 
   async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
-    return this.approvalService.decide(organizationId, requestId, approverUserId, decision, note, (tx, workflow) => this.finalizeApprovedResource(tx, workflow.resourceId, approverUserId, decision, note));
+    return this.approvalService.decideForResource(organizationId, 'LEAVE_REQUEST', requestId, approverUserId, decision, note, (tx, workflow) => this.finalizeDecision(tx, workflow.resourceId, approverUserId, decision, note));
   }
 
-  private async finalizeApprovedResource(tx: ApprovalTransaction, requestId: string, actorUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
-    const request = await tx.leaveRequest.findFirst({ where: { id: requestId }, });
+  private async finalizeDecision(tx: ApprovalTransaction, requestId: string, actorUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
+    const request = await tx.leaveRequest.findFirst({ where: { id: requestId } });
     if (!request) throw new NotFoundException('Leave request not found');
     if (request.status !== 'PENDING') throw new BadRequestException('Leave request is already finalized');
     const year = request.startDate.getUTCFullYear();
