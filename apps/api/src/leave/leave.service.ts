@@ -74,4 +74,25 @@ export class LeaveService {
       return updated;
     });
   }
+
+  async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
+    return prisma.$transaction(async (tx) => {
+      const request = await tx.leaveRequest.findFirst({ where: { id: requestId, organizationId }, include: { employee: true } });
+      if (!request) throw new NotFoundException('Leave request not found');
+      if (request.status !== 'PENDING') throw new BadRequestException('Only pending leave requests can be decided');
+      const manager = request.employee.managerId ? await tx.employee.findFirst({ where: { id: request.employee.managerId, organizationId } }) : null;
+      if (!manager || manager.userId !== approverUserId) throw new BadRequestException('You are not authorized to decide this leave request');
+
+      const year = request.startDate.getUTCFullYear();
+      if (decision === 'APPROVED') {
+        const balance = await tx.leaveBalance.findUnique({ where: { employeeId_leaveTypeId_year: { employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, year } } });
+        if (!balance || Number(balance.pending) < Number(request.workingDays)) throw new BadRequestException('Leave balance reservation is invalid');
+        await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
+      } else {
+        await tx.leaveBalance.updateMany({ where: { organizationId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
+      }
+
+      return tx.leaveRequest.update({ where: { id: request.id }, data: { status: decision, approverUserId, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
+    });
+  }
 }
