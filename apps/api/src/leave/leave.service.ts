@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
+import { LeaveApprovalService } from './leave.approval.service';
 
 @Injectable()
 export class LeaveService {
+  constructor(private readonly approvalService: LeaveApprovalService) {}
+
   private normalizeDate(value: string): Date {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
@@ -31,10 +34,10 @@ export class LeaveService {
 
   async createRequestForUser(organizationId: string, userId: string, leaveTypeId: string, start: string, end: string, reason?: string) {
     const employee = await this.employeeForUser(organizationId, userId);
-    return this.createRequest(organizationId, employee.id, leaveTypeId, start, end, reason);
+    return this.createRequest(organizationId, employee.id, leaveTypeId, start, end, reason, userId);
   }
 
-  async createRequest(organizationId: string, employeeId: string, leaveTypeId: string, start: string, end: string, reason?: string) {
+  async createRequest(organizationId: string, employeeId: string, leaveTypeId: string, start: string, end: string, reason?: string, createdByUserId?: string) {
     const startDate = this.normalizeDate(start);
     const endDate = this.normalizeDate(end);
     const days = this.workingDays(startDate, endDate);
@@ -54,6 +57,17 @@ export class LeaveService {
       if (available < days) throw new BadRequestException('Insufficient leave balance');
       const request = await tx.leaveRequest.create({ data: { organizationId, employeeId, leaveTypeId, startDate, endDate, workingDays: new Prisma.Decimal(days), reason: reason?.trim() || undefined } });
       await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { increment: new Prisma.Decimal(days) } } });
+      const approvers: string[] = [];
+      if (leaveType.requiresApproval) {
+        const manager = employee.managerId ? await tx.employee.findFirst({ where: { id: employee.managerId, organizationId }, select: { userId: true } }) : null;
+        if (!manager?.userId) throw new BadRequestException('No manager is configured for leave approval');
+        approvers.push(manager.userId);
+      }
+      if (approvers.length && createdByUserId) await this.approvalService.createWorkflowInTransaction(tx, organizationId, 'LEAVE_REQUEST', request.id, createdByUserId, approvers);
+      else if (!approvers.length) {
+        await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
+        return tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'APPROVED', decidedAt: new Date() } });
+      }
       return request;
     });
   }
@@ -68,31 +82,12 @@ export class LeaveService {
       const request = await tx.leaveRequest.findFirst({ where: { id: requestId, organizationId, employeeId } });
       if (!request) throw new NotFoundException('Leave request not found');
       if (request.status !== 'PENDING') throw new BadRequestException('Only pending leave requests can be cancelled');
+      const workflow = await tx.approvalWorkflow.findFirst({ where: { organizationId, resourceType: 'LEAVE_REQUEST', resourceId: request.id, status: 'PENDING' } });
+      if (workflow) await tx.approvalWorkflow.update({ where: { id: workflow.id }, data: { status: 'CANCELLED', completedAt: new Date() } });
       const updated = await tx.leaveRequest.update({ where: { id: request.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
       const year = request.startDate.getUTCFullYear();
       await tx.leaveBalance.updateMany({ where: { organizationId, employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
       return updated;
-    });
-  }
-
-  async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
-    return prisma.$transaction(async (tx) => {
-      const request = await tx.leaveRequest.findFirst({ where: { id: requestId, organizationId }, include: { employee: true } });
-      if (!request) throw new NotFoundException('Leave request not found');
-      if (request.status !== 'PENDING') throw new BadRequestException('Only pending leave requests can be decided');
-      const manager = request.employee.managerId ? await tx.employee.findFirst({ where: { id: request.employee.managerId, organizationId } }) : null;
-      if (!manager || manager.userId !== approverUserId) throw new BadRequestException('You are not authorized to decide this leave request');
-
-      const year = request.startDate.getUTCFullYear();
-      if (decision === 'APPROVED') {
-        const balance = await tx.leaveBalance.findUnique({ where: { employeeId_leaveTypeId_year: { employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, year } } });
-        if (!balance || Number(balance.pending) < Number(request.workingDays)) throw new BadRequestException('Leave balance reservation is invalid');
-        await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
-      } else {
-        await tx.leaveBalance.updateMany({ where: { organizationId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, year }, data: { pending: { decrement: request.workingDays } } });
-      }
-
-      return tx.leaveRequest.update({ where: { id: request.id }, data: { status: decision, approverUserId, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
     });
   }
 }
