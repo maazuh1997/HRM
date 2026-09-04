@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { prisma } from '@hrm/database';
 import { Prisma } from '@prisma/client';
-import { ApprovalService } from '../workflows/approval.service';
+import { ApprovalService, ApprovalTransaction } from '../workflows/approval.service';
 import { AuditService } from '../audit/audit.service';
 
 @Injectable()
@@ -113,6 +113,25 @@ export class LeaveService {
   }
 
   async decide(organizationId: string, requestId: string, approverUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
-    return this.approvalService.decide(organizationId, requestId, approverUserId, decision, note);
+    return this.approvalService.decide(organizationId, requestId, approverUserId, decision, note, (tx, workflow) => this.finalizeApprovedResource(tx, workflow.resourceId, approverUserId, decision, note));
+  }
+
+  private async finalizeApprovedResource(tx: ApprovalTransaction, requestId: string, actorUserId: string, decision: 'APPROVED' | 'REJECTED', note?: string) {
+    const request = await tx.leaveRequest.findFirst({ where: { id: requestId }, });
+    if (!request) throw new NotFoundException('Leave request not found');
+    if (request.status !== 'PENDING') throw new BadRequestException('Leave request is already finalized');
+    const year = request.startDate.getUTCFullYear();
+    const balance = await tx.leaveBalance.findUnique({ where: { employeeId_leaveTypeId_year: { employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, year } } });
+    if (!balance || Number(balance.pending) < Number(request.workingDays)) throw new BadRequestException('Leave balance reservation is invalid');
+    if (decision === 'APPROVED') {
+      await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays }, used: { increment: request.workingDays } } });
+      await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_BALANCE_CONSUMED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: Number(request.workingDays) } });
+      await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_APPROVED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { note: note?.trim() || null } });
+    } else {
+      await tx.leaveBalance.update({ where: { id: balance.id }, data: { pending: { decrement: request.workingDays } } });
+      await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_BALANCE_RELEASED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { workingDays: Number(request.workingDays) } });
+      await this.auditService.recordInTransaction(tx, { organizationId: request.organizationId, actorUserId, action: 'LEAVE_REJECTED', resourceType: 'LEAVE_REQUEST', resourceId: request.id, metadata: { note: note?.trim() || null } });
+    }
+    return tx.leaveRequest.update({ where: { id: request.id }, data: { status: decision, approverUserId: actorUserId, decidedAt: new Date(), decisionNote: note?.trim() || undefined } });
   }
 }
