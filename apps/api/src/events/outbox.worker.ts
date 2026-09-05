@@ -1,17 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { prisma } from '@hrm/database';
 import { DomainEventBus } from './domain-event.bus';
 import type { DomainEvent } from './domain-event';
+import { JobRunner } from '../jobs/job.runner';
 
 const BATCH_SIZE = 25;
 const MAX_ATTEMPTS = 10;
 const LEASE_SECONDS = 300;
+const POLL_INTERVAL_MS = 5000;
 
 @Injectable()
-export class OutboxWorker {
+export class OutboxWorker implements OnModuleInit {
   private readonly logger = new Logger(OutboxWorker.name);
 
-  constructor(private readonly eventBus: DomainEventBus) {}
+  constructor(private readonly eventBus: DomainEventBus, private readonly jobRunner: JobRunner) {}
+
+  onModuleInit() {
+    this.jobRunner.register({ name: 'outbox.process', intervalMs: POLL_INTERVAL_MS, handler: async () => { await this.processBatch(); } });
+  }
 
   async processBatch() {
     const now = new Date();
@@ -19,9 +25,7 @@ export class OutboxWorker {
       const events = await tx.$queryRaw<Array<{ id: string; organizationId: string; type: string; resourceType: string; resourceId: string; actorUserId: string | null; payload: unknown; occurredAt: Date }>>`
         SELECT "id", "organizationId", "type", "resourceType", "resourceId", "actorUserId", "payload", "occurredAt"
         FROM "OutboxEvent"
-        WHERE "processedAt" IS NULL
-          AND "availableAt" <= ${now}
-          AND "attempts" < ${MAX_ATTEMPTS}
+        WHERE "processedAt" IS NULL AND "availableAt" <= ${now} AND "attempts" < ${MAX_ATTEMPTS}
         ORDER BY "availableAt" ASC, "createdAt" ASC
         FOR UPDATE SKIP LOCKED
         LIMIT ${BATCH_SIZE}
@@ -30,7 +34,6 @@ export class OutboxWorker {
       await tx.outboxEvent.updateMany({ where: { id: { in: events.map((event) => event.id) }, processedAt: null }, data: { attempts: { increment: 1 }, availableAt: new Date(Date.now() + LEASE_SECONDS * 1000) } });
       return events;
     });
-
     for (const event of claimed) await this.process(event);
     return claimed.length;
   }
