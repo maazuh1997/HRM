@@ -5,6 +5,7 @@ import { LeaveNotificationHandler } from './leave-notification.handler';
 import { EmailDeliveryWorker } from './email-delivery.worker';
 import { SmtpEmailProvider } from './smtp-email.provider';
 import { EMAIL_PROVIDER } from './email-provider.token';
+import { JobRunner } from '../jobs/job.runner';
 
-@Module({ providers: [NotificationService, NotificationFactory, LeaveNotificationHandler, EmailDeliveryWorker, SmtpEmailProvider, { provide: EMAIL_PROVIDER, useExisting: SmtpEmailProvider }], exports: [NotificationService, NotificationFactory, EmailDeliveryWorker] })
+@Module({ providers: [NotificationService, NotificationFactory, LeaveNotificationHandler, EmailDeliveryWorker, SmtpEmailProvider, JobRunner, { provide: EMAIL_PROVIDER, useExisting: SmtpEmailProvider }], exports: [NotificationService, NotificationFactory, EmailDeliveryWorker] })
 export class NotificationModule {}
